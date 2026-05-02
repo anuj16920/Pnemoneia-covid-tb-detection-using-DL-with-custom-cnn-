@@ -47,6 +47,7 @@ archive.zip
 
 # Training outputs (large files)
 results/checkpoints/*.pth
+!results/checkpoints/best_fold1.pth
 results/logs/*.log
 *.log
 
