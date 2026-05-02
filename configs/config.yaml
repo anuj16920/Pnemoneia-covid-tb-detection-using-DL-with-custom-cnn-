@@ -1,0 +1,174 @@
+# ============================================================
+# Pulmonary Disease Classification - Master Configuration
+# ============================================================
+
+project:
+  name: "pulmonary_dx_hybrid"
+  version: "1.0.0"
+  seed: 42
+  device: "cuda"           # cuda | cpu
+  num_workers: 4
+  mixed_precision: true    # AMP training
+  gpu_id: 0                # GPU device ID (for 12GB VRAM)
+
+# ── Data ────────────────────────────────────────────────────
+data:
+  root_dir: "data_balanced/"   # Balanced dataset with 3000 images per class
+  image_size: 224
+  num_classes: 4
+  class_names: ["Normal", "Pneumonia", "Tuberculosis", "COVID-19"]
+  class_weights_auto: false     # Balanced dataset, no need for weights
+
+  # Train/Val/Test split (within each fold)
+  val_fraction: 0.15
+  test_fraction: 0.15
+
+  # CLAHE preprocessing
+  clahe:
+    enabled: true
+    clip_limit: 2.0
+    tile_grid_size: [8, 8]
+
+  # Augmentation
+  augmentation:
+    train:
+      random_horizontal_flip: 0.5
+      random_rotation: 10
+      color_jitter:
+        brightness: 0.2
+        contrast: 0.2
+        saturation: 0.1
+      random_erasing: 0.1
+      mixup_alpha: 0.2
+    val:
+      # Only normalization + CLAHE
+      pass: true
+
+  normalize:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+# ── Cross-Validation ─────────────────────────────────────────
+cross_validation:
+  n_folds: 5
+  stratified: true
+  shuffle: true
+
+# ── Model ────────────────────────────────────────────────────
+model:
+  # EfficientNet-B3 backbone
+  backbone:
+    name: "efficientnet_b3"
+    pretrained: true
+    freeze_stages: [0, 1, 2]   # Freeze first 3 MBConv stages
+    out_channels: 384           # Output channels from backbone
+
+  # Dynamic Dual Attention
+  dyda:
+    enabled: true
+    reduction_ratio: 16         # Channel attention bottleneck ratio
+    spatial_kernel_size: 7      # Spatial attention conv kernel
+    gate_hidden_dim: 64         # MLP hidden dim for gate computation
+
+  # CBAM (for ablation)
+  cbam:
+    enabled: false
+    reduction_ratio: 16
+
+  # Swin Transformer branch
+  swin:
+    enabled: true
+    img_size: 224
+    patch_size: 4
+    in_chans: 3
+    embed_dim: 96
+    depths: [2, 2, 6, 2]
+    num_heads: [3, 6, 12, 24]
+    window_size: 7
+    mlp_ratio: 4.0
+    dropout: 0.0
+    attn_dropout: 0.0
+    drop_path_rate: 0.1
+    pretrained_swin: true       # Load pretrained Swin-T weights
+
+  # Fusion head
+  fusion:
+    cnn_feat_dim: 1536          # EfficientNet-B3 GAP output
+    swin_feat_dim: 768          # Swin-T final stage output
+    hidden_dim: 512
+    dropout: 0.4
+    num_classes: 4
+
+# ── Training ─────────────────────────────────────────────────
+training:
+  epochs: 35                  # Reduced from 50 to 35
+  batch_size: 16              # Reduced for 12GB VRAM
+  gradient_clip_norm: 1.0
+  accumulation_steps: 2       # Effective batch size = 32
+
+  optimizer:
+    name: "adamw"
+    lr: 1.0e-4
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+  # Differential learning rates
+  lr_backbone: 1.0e-5           # Lower LR for pretrained backbone
+  lr_dyda: 1.0e-4
+  lr_swin: 1.0e-5
+  lr_head: 1.0e-4
+
+  scheduler:
+    name: "cosine_warmup"
+    warmup_epochs: 10
+    min_lr: 1.0e-7
+
+  loss:
+    name: "label_smoothing_ce"
+    smoothing: 0.1
+    use_class_weights: true
+
+  early_stopping:
+    enabled: true
+    patience: 10
+    monitor: "val_f1_macro"
+    mode: "max"
+
+# ── Evaluation ───────────────────────────────────────────────
+evaluation:
+  metrics: ["accuracy", "f1_macro", "f1_per_class", "auc_roc", "confusion_matrix"]
+  threshold: 0.5
+
+# ── Grad-CAM ─────────────────────────────────────────────────
+gradcam:
+  target_layer: "backbone.features.6"   # EfficientNet layer
+  output_dir: "results/gradcam/"
+  num_samples: 20                        # Samples per class
+
+# ── Ablation ─────────────────────────────────────────────────
+ablation:
+  configs:
+    - name: "backbone_only"
+      dyda_enabled: false
+      cbam_enabled: false
+      swin_enabled: false
+    - name: "backbone_cbam"
+      dyda_enabled: false
+      cbam_enabled: true
+      swin_enabled: false
+    - name: "backbone_dyda_no_swin"
+      dyda_enabled: true
+      cbam_enabled: false
+      swin_enabled: false
+    - name: "full_model"
+      dyda_enabled: true
+      cbam_enabled: false
+      swin_enabled: true
+
+# ── Paths ────────────────────────────────────────────────────
+paths:
+  checkpoints: "results/checkpoints/"
+  logs: "results/logs/"
+  plots: "results/plots/"
+  gradcam: "results/gradcam/"
