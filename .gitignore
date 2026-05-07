@@ -46,8 +46,7 @@ COVID-19_Radiography_Dataset/
 archive.zip
 
 # Training outputs (large files)
-results/checkpoints/*.pth
-!results/checkpoints/best_fold1.pth
+# Allow all checkpoints to be tracked with Git LFS
 results/logs/*.log
 *.log
 
@@ -70,10 +69,12 @@ live_*.log
 train_*.log
 nohup.out
 
-# Model weights (too large)
+# Model weights - tracked with Git LFS in results/checkpoints/
+# Exclude other locations
 *.pth
 *.pt
 *.ckpt
+!results/checkpoints/*.pth
 
 # Large result files
 results/plots/*.png
