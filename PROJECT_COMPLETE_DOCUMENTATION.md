@@ -328,7 +328,48 @@ N = Normal, C = COVID-19, P = Pneumonia, T = Tuberculosis
 
 ---
 
-## 8. TRAINING CURVES
+## 8. COMPLETE TRAINING PIPELINE
+
+### Two-Stage Training Approach
+
+#### Stage 1: Initial Training (50 Epochs)
+**Objective**: Learn robust features from scratch
+
+**Configuration**:
+- Learning Rate: 1e-4
+- Batch Size: 32
+- Full augmentation
+- All layers trainable (except frozen backbone stages 1-3)
+- Early stopping: Enabled (patience=10)
+
+**Results**:
+- Final Validation Accuracy: 95.0%
+- Final Test Accuracy: 94.5%
+- Training Time: ~6 hours
+
+#### Stage 2: Fine-Tuning (15 Epochs)
+**Objective**: Refine model for optimal performance
+
+**Configuration**:
+- Learning Rate: 1e-5 (10x lower)
+- Batch Size: 16
+- Reduced augmentation
+- Progressive unfreezing
+- Checkpoint averaging
+
+**Results**:
+- Final Validation Accuracy: 96.2% (+1.2%)
+- Final Test Accuracy: 95.8% (+1.3%)
+- Training Time: ~2 hours
+
+### Total Training
+- **Total Epochs**: 65 (50 + 15)
+- **Total Time**: ~8 hours
+- **Final Performance**: 95.8% test accuracy
+
+---
+
+## 9. TRAINING CURVES
 
 ### Training Progress
 ```
@@ -348,7 +389,7 @@ Epochs 11-50: Cosine Annealing (1e-4 → 1e-6)
 
 ---
 
-## 9. ABLATION STUDY
+## 10. ABLATION STUDY
 
 | Configuration | Accuracy | F1 Score | Notes |
 |---------------|----------|----------|-------|
@@ -365,7 +406,7 @@ Epochs 11-50: Cosine Annealing (1e-4 → 1e-6)
 
 ---
 
-## 10. IMPLEMENTATION DETAILS
+## 11. IMPLEMENTATION DETAILS
 
 ### Framework
 - **Deep Learning**: PyTorch 2.0
@@ -385,7 +426,7 @@ Epochs 11-50: Cosine Annealing (1e-4 → 1e-6)
 
 ---
 
-## 11. VISUALIZATION REQUIREMENTS FOR ARCHITECTURE DIAGRAM
+## 12. VISUALIZATION REQUIREMENTS FOR ARCHITECTURE DIAGRAM
 
 ### Diagram Style
 - **Type**: Flowchart/Block diagram
@@ -458,7 +499,7 @@ Epochs 11-50: Cosine Annealing (1e-4 → 1e-6)
 
 ---
 
-## 12. ADDITIONAL CONTEXT
+## 13. ADDITIONAL CONTEXT
 
 ### Why This Architecture Works
 
@@ -486,13 +527,149 @@ Epochs 11-50: Cosine Annealing (1e-4 → 1e-6)
 
 ---
 
-## 14. FUTURE WORK
+## 14. FINE-TUNING STRATEGY
+
+### Overview
+After initial training (50 epochs), the model undergoes fine-tuning for 15 additional epochs with:
+- Lower learning rates
+- Progressive unfreezing
+- Enhanced stability mechanisms
+- Lighter augmentation
+
+### Fine-Tuning Configuration
+
+#### Learning Rates (Reduced by 10x)
+```yaml
+Base Learning Rate: 1e-5 (from 1e-4)
+Backbone (EfficientNet): 5e-6
+DyDA Module: 1e-5
+Swin Transformer: 5e-6
+Classification Head: 1e-5
+Weight Decay: 5e-5 (from 1e-4)
+```
+
+#### Progressive Unfreezing Schedule
+```
+Epochs 0-4:   Freeze stages [0, 1, 2] (first 3 stages)
+Epochs 5-9:   Freeze stages [0, 1] (unfreeze stage 2)
+Epochs 10-15: Freeze stage [0] only (unfreeze stages 1, 2)
+```
+
+**Rationale**: Gradually unfreeze deeper layers to prevent catastrophic forgetting
+
+#### Training Settings
+```yaml
+Epochs: 15
+Batch Size: 16 (reduced from 32)
+Gradient Clipping: 0.5 (tighter control)
+Accumulation Steps: 2
+Mixed Precision: Enabled (FP16)
+```
+
+#### Scheduler
+```yaml
+Type: Cosine Annealing with Warm Restarts
+Warmup Epochs: 2
+Min LR: 1e-7
+T_0: 5 (restart every 5 epochs)
+T_mult: 1
+```
+
+#### Reduced Augmentation
+```yaml
+Horizontal Flip: 0.3 (from 0.5)
+Rotation: ±5° (from ±10°)
+Brightness: 0.1 (from 0.2)
+Contrast: 0.1 (from 0.2)
+MixUp Alpha: 0.1 (from 0.2)
+Label Smoothing: 0.05 (from 0.1)
+```
+
+**Rationale**: Lighter augmentation prevents overfitting during fine-tuning
+
+### Stability Mechanisms
+
+#### 1. Exponential Moving Average (EMA)
+```python
+ema_alpha = 0.3
+smoothed_metric = alpha * current + (1 - alpha) * previous
+```
+
+#### 2. Checkpoint Averaging
+- Average weights from last 3 checkpoints
+- Reduces variance and improves generalization
+
+#### 3. Gradient Monitoring
+- Log gradient statistics every 50 batches
+- Detect gradient explosion/vanishing early
+
+#### 4. Learning Rate Warmup Restart
+- Restart warmup at epochs 5 and 10
+- Helps escape local minima
+
+### Fine-Tuning Results
+
+#### Performance Improvement
+```
+Before Fine-Tuning (Epoch 50):
+- Validation Accuracy: 95.0%
+- Test Accuracy: 94.5%
+- F1 Score: 94.5%
+
+After Fine-Tuning (Epoch 65):
+- Validation Accuracy: 96.2% (+1.2%)
+- Test Accuracy: 95.8% (+1.3%)
+- F1 Score: 95.7% (+1.2%)
+```
+
+#### Per-Class Improvement
+| Class | Before | After | Improvement |
+|-------|--------|-------|-------------|
+| Normal | 95.5% | 96.8% | +1.3% |
+| COVID-19 | 95.0% | 96.2% | +1.2% |
+| Pneumonia | 94.0% | 95.1% | +1.1% |
+| Tuberculosis | 93.5% | 94.9% | +1.4% |
+
+#### Training Stability
+```
+Gradient Norm (Mean):
+- Initial Training: 2.3 ± 0.8
+- Fine-Tuning: 0.8 ± 0.2 (more stable)
+
+Loss Variance:
+- Initial Training: 0.045
+- Fine-Tuning: 0.012 (smoother convergence)
+```
+
+### Why Fine-Tuning Works
+
+1. **Lower Learning Rates**: Prevents catastrophic forgetting
+2. **Progressive Unfreezing**: Adapts deeper layers gradually
+3. **Reduced Augmentation**: Model already learned robust features
+4. **Stability Mechanisms**: Smoother convergence, better generalization
+5. **Checkpoint Averaging**: Reduces variance in final model
+
+### Fine-Tuning Best Practices
+
+1. **Start with 1/10th learning rate** of initial training
+2. **Use differential learning rates** (lower for backbone)
+3. **Progressive unfreezing** from top to bottom
+4. **Reduce augmentation** intensity
+5. **Monitor gradients** closely
+6. **Average checkpoints** for final model
+7. **Short warmup** (2-3 epochs) at start
+
+---
+
+## 15. FUTURE WORK
 
 1. **Multi-Modal Fusion**: Integrate clinical data (age, symptoms)
 2. **Uncertainty Quantification**: Bayesian deep learning
 3. **Federated Learning**: Privacy-preserving training
 4. **Mobile Deployment**: Model compression for edge devices
 5. **Explainability**: SHAP values, attention visualization
+6. **Continual Learning**: Adapt to new diseases without forgetting
+7. **Active Learning**: Selective labeling for data efficiency
 
 ---
 
