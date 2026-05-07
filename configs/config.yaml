@@ -7,9 +7,9 @@ project:
   version: "1.0.0"
   seed: 42
   device: "cuda"           # cuda | cpu
-  num_workers: 4
+  num_workers: 8           # INCREASED from 4 to 8 for faster data loading
   mixed_precision: true    # AMP training
-  gpu_id: 0                # GPU device ID (for 12GB VRAM)
+  gpu_id: 0                # GPU device ID
 
 # ── Data ────────────────────────────────────────────────────
 data:
@@ -39,7 +39,7 @@ data:
         contrast: 0.2
         saturation: 0.1
       random_erasing: 0.1
-      mixup_alpha: 0.2
+      mixup_alpha: 0.0  # DISABLED MixUp for higher training accuracy
     val:
       # Only normalization + CLAHE
       pass: true
@@ -102,9 +102,9 @@ model:
 # ── Training ─────────────────────────────────────────────────
 training:
   epochs: 35                  # Reduced from 50 to 35
-  batch_size: 16              # Reduced for 12GB VRAM
+  batch_size: 32              # INCREASED from 16 to 32 for more GPU usage
   gradient_clip_norm: 1.0
-  accumulation_steps: 2       # Effective batch size = 32
+  accumulation_steps: 1       # REMOVED accumulation - direct batch processing
 
   optimizer:
     name: "adamw"

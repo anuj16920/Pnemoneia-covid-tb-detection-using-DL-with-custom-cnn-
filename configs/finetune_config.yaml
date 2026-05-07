@@ -1,0 +1,179 @@
+# ============================================================
+# Fine-tuning Configuration for Stable Growth
+# ============================================================
+# This config is optimized for 15 additional epochs with:
+#   - Lower learning rates
+#   - Cosine annealing with warm restarts
+#   - Progressive unfreezing
+#   - Enhanced stability mechanisms
+
+project:
+  name: "pulmonary_dx_finetune"
+  version: "1.1.0"
+  seed: 42
+  device: "cuda"
+  num_workers: 4
+  mixed_precision: true
+  gpu_id: 0
+
+# ── Data (same as original) ──────────────────────────────────
+data:
+  root_dir: "data_balanced/"
+  image_size: 224
+  num_classes: 4
+  class_names: ["Normal", "Pneumonia", "Tuberculosis", "COVID-19"]
+  class_weights_auto: false
+
+  val_fraction: 0.15
+  test_fraction: 0.15
+
+  clahe:
+    enabled: true
+    clip_limit: 2.0
+    tile_grid_size: [8, 8]
+
+  # Lighter augmentation for fine-tuning
+  augmentation:
+    train:
+      random_horizontal_flip: 0.3      # Reduced from 0.5
+      random_rotation: 5               # Reduced from 10
+      color_jitter:
+        brightness: 0.1                # Reduced from 0.2
+        contrast: 0.1                  # Reduced from 0.2
+        saturation: 0.05               # Reduced from 0.1
+      random_erasing: 0.05             # Reduced from 0.1
+      mixup_alpha: 0.1                 # Reduced from 0.2
+    val:
+      pass: true
+
+  normalize:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+# ── Cross-Validation ─────────────────────────────────────────
+cross_validation:
+  n_folds: 5
+  stratified: true
+  shuffle: true
+
+# ── Model (same architecture) ────────────────────────────────
+model:
+  backbone:
+    name: "efficientnet_b3"
+    pretrained: false                  # Loading from checkpoint
+    freeze_stages: []                  # Controlled by progressive unfreezing
+    out_channels: 384
+
+  dyda:
+    enabled: true
+    reduction_ratio: 16
+    spatial_kernel_size: 7
+    gate_hidden_dim: 64
+
+  cbam:
+    enabled: false
+    reduction_ratio: 16
+
+  swin:
+    enabled: true
+    img_size: 224
+    patch_size: 4
+    in_chans: 3
+    embed_dim: 96
+    depths: [2, 2, 6, 2]
+    num_heads: [3, 6, 12, 24]
+    window_size: 7
+    mlp_ratio: 4.0
+    dropout: 0.0
+    attn_dropout: 0.0
+    drop_path_rate: 0.1
+    pretrained_swin: false             # Already loaded
+
+  fusion:
+    cnn_feat_dim: 1536
+    swin_feat_dim: 768
+    hidden_dim: 512
+    dropout: 0.3                       # Reduced from 0.4 for stability
+    num_classes: 4
+
+# ── Fine-tuning Training Settings ────────────────────────────
+training:
+  epochs: 15                           # Fine-tuning epochs
+  batch_size: 16
+  gradient_clip_norm: 0.5              # Tighter clipping for stability
+  accumulation_steps: 2
+
+  optimizer:
+    name: "adamw"
+    lr: 1.0e-5                         # 1/10th of original (1e-4)
+    weight_decay: 5.0e-5               # Reduced from 1e-4
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+  # Differential learning rates (all reduced)
+  lr_backbone: 5.0e-6                  # Very low for pretrained backbone
+  lr_dyda: 1.0e-5
+  lr_swin: 5.0e-6
+  lr_head: 1.0e-5
+
+  # Cosine annealing with warm restarts
+  scheduler:
+    name: "cosine_warmup"
+    warmup_epochs: 2                   # Short warmup
+    min_lr: 1.0e-7                     # Lower floor
+    T_0: 5                             # Restart every 5 epochs
+    T_mult: 1                          # Keep same cycle length
+
+  loss:
+    name: "label_smoothing_ce"
+    smoothing: 0.05                    # Reduced from 0.1
+    use_class_weights: true
+
+  # Disable early stopping for fine-tuning
+  early_stopping:
+    enabled: false
+    patience: 15
+    monitor: "val_f1_macro"
+    mode: "max"
+
+# ── Progressive Unfreezing Schedule ──────────────────────────
+progressive_unfreezing:
+  enabled: true
+  schedule:
+    # Epoch range: frozen stages
+    "0-4": [0, 1, 2]                   # Keep first 3 stages frozen
+    "5-9": [0, 1]                      # Unfreeze stage 2
+    "10-15": [0]                       # Unfreeze stage 1, keep stage 0 frozen
+
+# ── Stability Mechanisms ─────────────────────────────────────
+stability:
+  # Exponential moving average for metrics
+  ema_alpha: 0.3
+  
+  # Checkpoint averaging
+  checkpoint_averaging:
+    enabled: true
+    num_checkpoints: 3                 # Average last 3 checkpoints
+  
+  # Gradient monitoring
+  gradient_monitoring:
+    enabled: true
+    log_interval: 50                   # Log gradient stats every 50 batches
+  
+  # Learning rate warmup restart
+  lr_warmup_restart:
+    enabled: true
+    restart_epochs: [5, 10]            # Restart warmup at these epochs
+
+# ── Evaluation ───────────────────────────────────────────────
+evaluation:
+  metrics: ["accuracy", "f1_macro", "f1_per_class", "auc_roc", "confusion_matrix"]
+  threshold: 0.5
+
+# ── Paths ────────────────────────────────────────────────────
+paths:
+  checkpoints: "results/finetuned/checkpoints/"
+  logs: "results/finetuned/logs/"
+  plots: "results/finetuned/plots/"
+  gradcam: "results/finetuned/gradcam/"
+

@@ -1,0 +1,152 @@
+# Maximum GPU Usage Configuration for Fine-tuning
+# Optimized for GTX 1080 Ti (11GB)
+
+project:
+  name: "pulmonary_dx_finetune_maxgpu"
+  version: "1.1.0"
+  seed: 42
+  device: "cuda"
+  num_workers: 8              # Max data loading threads
+  mixed_precision: true       # Keep AMP for efficiency
+  gpu_id: 0
+
+data:
+  root_dir: "data_balanced/"
+  image_size: 224
+  num_classes: 4
+  class_names: ["Normal", "Pneumonia", "Tuberculosis", "COVID-19"]
+  class_weights_auto: false
+
+  val_fraction: 0.15
+  test_fraction: 0.15
+
+  clahe:
+    enabled: true
+    clip_limit: 2.0
+    tile_grid_size: [8, 8]
+
+  # NO MIXUP for higher training accuracy
+  augmentation:
+    train:
+      random_horizontal_flip: 0.5
+      random_rotation: 10
+      color_jitter:
+        brightness: 0.2
+        contrast: 0.2
+        saturation: 0.1
+      random_erasing: 0.1
+      mixup_alpha: 0.0        # DISABLED - no MixUp
+    val:
+      pass: true
+
+  normalize:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+cross_validation:
+  n_folds: 5
+  stratified: true
+  shuffle: true
+
+model:
+  backbone:
+    name: "efficientnet_b3"
+    pretrained: false
+    freeze_stages: []
+    out_channels: 384
+
+  dyda:
+    enabled: true
+    reduction_ratio: 16
+    spatial_kernel_size: 7
+    gate_hidden_dim: 64
+
+  cbam:
+    enabled: false
+    reduction_ratio: 16
+
+  swin:
+    enabled: true
+    img_size: 224
+    patch_size: 4
+    in_chans: 3
+    embed_dim: 96
+    depths: [2, 2, 6, 2]
+    num_heads: [3, 6, 12, 24]
+    window_size: 7
+    mlp_ratio: 4.0
+    dropout: 0.0
+    attn_dropout: 0.0
+    drop_path_rate: 0.1
+    pretrained_swin: false
+
+  fusion:
+    cnn_feat_dim: 1536
+    swin_feat_dim: 768
+    hidden_dim: 512
+    dropout: 0.3
+    num_classes: 4
+
+# MAXIMUM GPU USAGE SETTINGS
+training:
+  epochs: 15
+  batch_size: 32              # Optimized for GTX 1080 Ti
+  gradient_clip_norm: 0.5
+  accumulation_steps: 1       # Direct processing, no accumulation
+
+  optimizer:
+    name: "adamw"
+    lr: 1.0e-5
+    weight_decay: 5.0e-5
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+  lr_backbone: 5.0e-6
+  lr_dyda: 1.0e-5
+  lr_swin: 5.0e-6
+  lr_head: 1.0e-5
+
+  scheduler:
+    name: "cosine_warmup"
+    warmup_epochs: 2
+    min_lr: 1.0e-7
+
+  loss:
+    name: "label_smoothing_ce"
+    smoothing: 0.05
+    use_class_weights: true
+
+  early_stopping:
+    enabled: false
+    patience: 15
+    monitor: "val_f1_macro"
+    mode: "max"
+
+progressive_unfreezing:
+  enabled: true
+  schedule:
+    "0-4": [0, 1, 2]
+    "5-9": [0, 1]
+    "10-15": [0]
+
+stability:
+  ema_alpha: 0.3
+  checkpoint_averaging:
+    enabled: true
+    num_checkpoints: 3
+  gradient_monitoring:
+    enabled: true
+    log_interval: 50
+  lr_warmup_restart:
+    enabled: true
+    restart_epochs: [5, 10]
+
+evaluation:
+  metrics: ["accuracy", "f1_macro", "f1_per_class", "auc_roc", "confusion_matrix"]
+  threshold: 0.5
+
+paths:
+  checkpoints: "results/finetuned/checkpoints/"
+  logs: "results/finetuned/logs/"
+  plots: "results/finetuned/plots/"
+  gradcam: "results/finetuned/gradcam/"
